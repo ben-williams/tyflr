@@ -1,0 +1,8 @@
+
+- CONVERT dokuwiki tyflr to md, then to Rmd
+- RESTRUCTURE tyflr
+- ADD links to R code and pdf version
+- CREATE makefile and workflow description
+- INVESTIGATE git hooks
+- REDIRECT tfylr.flr-project.org to tyflr.github.com
+- CHECK http://jekyllrb.com/docs/quickstart/
