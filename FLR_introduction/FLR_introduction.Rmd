@@ -1,0 +1,13 @@
+# A 15-min Introduction to FLR for Quantitative Fisheries Scientists
+
+## SETTING FLR UP
+
+```{r}
+install.packages(c("FLCore"), repos="http://flr-project.org/R")
+```
+
+## FLCore
+
+```{r}
+library(FLCore)
+```
