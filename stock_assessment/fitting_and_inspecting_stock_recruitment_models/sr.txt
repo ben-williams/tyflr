@@ -1,0 +1,668 @@
+====== FLSR: Stock Recruitment Modelling ======
+----
+**Revisions**: //Clara Ulrich, 18/11/2009; Ernesto Jardim, 03/08/2010.//\\
+**Versions**: //R 2.11.1; FLR 2.3 dev//
+----
+
+**NB: The tutorial below hasn't been updated recently. Please read the {{:tutorials:flsr.pdf|FLSR.pdf}} vignette, with the corresponding {{:tutorials:flsr.r|Rcode}} for the more recent document**\\
+\\
+A fundamental problem in the biological assessment of fisheries is the relationship between the stock and recruitment. The ''FLSR'' class, an extension of ''FLModel'', allows a variety of stock-recruit models to be estimated from data and for stock recruitment relationships to be implemented in a variety of FLR classes.
+
+An object of type ''FLSR'' can be created from other classes, primarily ''FLStock'' and ''FLBiol'' and then used when calculating biological reference points using ''FLBRP'' or performing projections using ''FLash'',
+
+Examples are given of fitting and examining a variety of relationships based upon maximum likelihood estimation. 
+
+
+===== Functional Forms =====
+
+A variety of commonly used stock recruit relationships are available in FLCore, including
+   * **Ricker**                                     (rec ~ a * ssb * exp(-b * ssb))
+   * **Beverton and Holt**                          (rec ~ a * ssb/(b + ssb))
+   * **Shepherd**                                   (rec ~ a * ssb/(1 + (ssb/b)^c))
+   * **Segmented Regression, or Hockey stick**      (rec ~ (ifelse(ssb <= b, a * ssb, a * b))
+   * **Mean**                                       (rec ~ a)
+   * **Non-parametric based on a lowess smoother**   
+   
+Which are extended to include
+   * Depensation
+   * Co-variates
+   * Autocorrrelation
+
+and parameterisation can be either based upon 'alpha' and 'beta' or 'steepness' and 'virgin biomass'
+
+These can be chosen by using the following FLR functions, all of which assume lognormal errors
+
+   ricker       : Ricker 
+   ricker.d     : Depensatory ricker
+   ricker.c.a   : Ricker with alpha varying with a covariate
+   ricker.c.b   : Ricker with beta varying with a covariate
+   ricker.sv    : Ricker parameterised as steepness and virgin biomass
+   ricker.ar1   : Ricker with autocorrelated residuals
+
+   bevholt      : Beverton & Holt 
+   bevholt.d    : Depensatory Beverton & Holt
+   bevholt.c.a  : Beverton & Holt with alpha varying with a covariate
+   bevholt.c.b  : Beverton & Holt with beta varying with a covariate
+   bevholt.sv   : Beverton & Holt parameterised as steepness and virgin biomass
+   bevholt.ar1  : Beverton & Holt with autocorrelated residuals
+   bevholt.ndc  : Beverton & Holt with shifted origin
+
+   shepherd         : Shepherd 
+   shepherd.ndc     : Shepherd with shifted origin
+   shepherd.ndc.ar1 : Shepherd shifted origin with autocorrelated residuals
+   shepherd.ar1     : Shepherd with autocorrelated residuals
+   shepherd.d       : Depensatory Shepherd
+
+   geomean          : Geometric mean 
+   mean             : Mean
+   segreg           : Segmented regression or 'Hockey Stick' 
+
+===== Structure =====
+In the ''FLSR'' class slots exist for the S-R observations 
+    rec          # FLQuant: recruitment time series
+    ssb          # FLQuant: Spawning Stock Biomass time series
+and any additional covariates 
+    covar        # FLQuants : optional covariates to be included in any model fit
+
+''FLSR'' is an extension of the ''FLModel'' class and therefore inherits it's slots i.e. 
+    model        # formula: srr model formula eg. rec~alpha*ssb^beta
+    logl         # function: the likelihood function
+    grad         # function: the gradient function
+    initial      # function: self starting parameter initialisation function
+    params       # FLPar: the model parameters
+    logLik       # logLik: the extracted log likelihood
+    vcov         # array: variance covariance matrix of parameter estimates
+    details      # list:
+    residuals    # FLArray: holding the recruitment residuals
+    fitted       # FLArray: holding the fitted values
+
+In common with all composite FLR classes it also contains the name, desc and range slots.
+
+Standard methods such as ''plot'' and ''summary'' can all be used on ''FLSR'' objects.
+
+An example ''FLSR'' object ''nsher'' is available in FLCore
+
+<code R>
+library(FLCore)
+
+# load and inspect the example in FLCore
+data(nsher)
+
+class(nsher)
+summary(nsher)
+</code>
+
+
+===== Creating =====
+
+New ''FLSR'' objects can be created from objects of other classes e.g. ''FLStock'', ''FLBiol'' and ''FLQuant'' objects.
+
+<code R>
+# creating an FLSR object by specifying the rec and ssb as FLQuant objects directly
+nsher.sr<-FLSR(rec=FLQuant(rec(nsher)),ssb=FLQuant(ssb(nsher)))
+</code>
+
+Alternatively you can create an ''FLSR'' object by coercion from an object of another class
+<code R>
+# loading the FLStock example in FLCore
+data(ple4)
+
+# create an FLSR object
+ple4.sr<-as.FLSR(ple4)
+
+# The rec and ssb slots have now been filled using the data in ple4
+ssb(ple4.sr)
+rec(ple4.sr)
+
+# Note the shift in years.  This reflects that recruitment is at age 1 in the ple4.
+
+# This also works with FLBiol
+# loading the FLBiol example in FLCore
+data(ple4.biol)
+
+# create an FLSR object from an FLBiol
+ple4.sr<-as.FLSR(ple4.biol)
+
+
+</code>
+
+
+
+===== Using =====
+The SR model for nsher is a Ricker, which can be shown using ''plot''
+
+<code R>
+plot(nsher)
+</code>
+
+Selecting other functional forms is done by altering the model slot, 
+for example to fit a Beverton and Holt relationship.
+
+<code R>
+model(nsher)<-bevholt()
+model(nsher)
+nsher <- fmle(nsher)
+
+summary(nsher)
+
+# inspect the logl function
+logl(nsher)
+</code>
+
+When fitting it can be important to specify initial starting values, or limits
+<code R>
+# inspect the function providing initial values to the optimizer
+initial(nsher)
+
+# lower and upper limits for the parameters are set, and used if method 
+# 'L-BFGS-B' is used in the call to optim, as is default in fmle
+lower(nsher)
+upper(nsher)
+
+# fit it with fmle
+nsher <- fmle(nsher)
+
+# and look at the fit
+plot(nsher)
+
+# fixed values can be chosen for any parameter 
+nsher_fixed_a <- fmle(nsher, fixed=list(a=12500))
+
+# and results compared, for example using AIC
+AIC(nsher)
+AIC(nsher_fixed_a)
+</code>
+
+Here you may well see something counter-intuitive: that the AIC for the simpler model (''nsher_fixed_a'') is smaller than that of the full model (''nsher'') suggesting that the model with ''a'' fixed fits better than the model where we estimate ''a''. This is an initial sign of a lack of information in the data with respect to both the parameters of the model. The next step is to look at the approximate variance-covariance matrix of the MLE: ''vcov(nsher)''. You should see negative diagonal elements for ''a'' and ''b'' suggesting negative variance - not so likely! This is a secondary sign of potentially poor convergence on the MLE. If we have a well defined MLE the Hessian matrix (the matrix of second partial derivatives) of the log-likelihood should be positive definite and when inverted a reasonable approximation  to the variance-covariance matrix of the MLE. Poorly defined/indeterminate MLEs give rise to non positive-definite Hessians and weird covariance matrices so always look for these signs. 
+
+In truth there is a problem in the NS herring data with respect to the ''b'' parameter not really for ''a'' but the correlation made it appear to be a problem with ''a'' in this example. The ''b'' parameter needs lots of observations far from the origin (zero SSB and recruitment) and for herring the information in this region is more sparse and noisy...
+
+===== Rescaling =====
+Recruitment and SSB estimates from stock assessment are often expressed in large numbers, which can create some issues for the MLE fitting procedure. It may be therefore necessary to reduce numbers to a lower scale before the fitting. A rule of thumb would be to keep figures lower than 1000. In the current FLR version, is still necessary to do such rescaling manually, although some work is in progress to do this automatically in the near future. After the fitting, it will be necessary to rescale the fitted parameters back, in order to keep the structural form of the SR relationships. But of course, this rescaling differs between the various SR models. For example : 
+
+<code R>
+ple4sr <- as.FLSR(ple4, model='bevholt')
+rec(ple4sr) <- rec(ple4sr)/1000
+ssb(ple4sr) <- ssb(ple4sr)/1000
+ple4sr <- fmle(ple4sr)
+
+# Check scaled recruitment with scaled ssb
+predict(ple4sr,ssb=FLQuant(100))
+
+# Ttransform the parameters
+params(ple4sr)["b",] <- params(ple4sr)["b",] * 1000
+params(ple4sr)["a",] <- params(ple4sr)["a",] * 1000
+# Check unscaled recruitment with unscaled ssb
+predict(ple4sr,ssb=FLQuant(100000))
+
+# And for Ricker
+ple4sr <- as.FLSR(ple4, model='ricker')
+rec(ple4sr) <- rec(ple4sr)/1000
+ssb(ple4sr) <- ssb(ple4sr)/1000
+ple4sr <- fmle(ple4sr)
+plot(ple4sr)
+
+# Need to transform the SR parameters
+# Check scaled recruitment with scaled ssb
+predict(ple4sr,ssb=FLQuant(100))
+# Ttransform the parameters
+params(ple4sr)["b",] <- params(ple4sr)["b",] / 1000
+# Check unscaled recruitment with unscaled ssb
+predict(ple4sr,ssb=FLQuant(100000))
+</code>
+
+
+
+===== Examples =====
+
+The various  elements of the ''FLSR'' class are demonstarted for a variety of examples, i.e.
+
+  * Fitting.
+  * Checking diagnostics
+  * Alternative models and parameterisations
+  * Fitting covariates
+  * Depensation
+  * Autocorrelation
+  * Creating alternative stock recruitment relationships.
+
+
+==== Fitting ====
+
+Before choosing the functional form, a lowess smoother can be fitted to suggest an appropriate relationship, e.g. does recruitment tend to a constant (i.e. Beverton and Holt) or decline (i.e. Ricker) at high stock sizes. This can be done using a xyplot with panels e.g. 
+
+<code R>
+xyplot(rec~ssb,data=model.frame(FLQuants(ssb=ssb(nsher),rec=rec(nsher))),
+  panel=function(x, y){
+	panel.xyplot(x, y, pch=19,col="blue")
+	panel.loess(x, y, lty=4,col="red")
+  },xlab="SSB",ylab="Recruits")
+
+</code>
+
+Lowess fit to herring stock recruit data.
+{{:documentation:tutorials:lowess.jpeg?500}}
+
+Looks like a Ricker eh!
+
+<code R>
+model(nsher)<-ricker()
+nsher<-fmle(nsher)
+
+sr.data<-model.frame(FLQuants(ssb=ssb(nsher),rec=rec(nsher),fitted=fitted(nsher)))
+
+xyplot(rec~ssb, sr.data,
+  panel=function(x, y, subscripts){
+	panel.xyplot(x, y, pch=1,col="red")
+	panel.loess(x, y, lty=4,col="red")
+	panel.lines(sort(sr.data$ssb), sr.data$fitted[order(sr.data$ssb)])
+  })
+</code>
+
+Comparing the non-parametric and parameteric fits
+
+{{:documentation:tutorials:ricker.jpeg?500}}
+
+==== Checking diagnostics ====
+
+Inspect fit and check diagnostics 
+
+<code R>
+plot(nsher)
+</code>
+
+{{:documentation:tutorials:sdiag.jpeg?400}}
+
+==== Alternative models ====
+
+Fitting an alternative form requires changing the model, e.g. to Beverton and Holt
+<code R>
+## first fit Ricker
+nsher.rk       <-nsher
+model(nsher.rk)<-ricker()
+nsher.rk       <-fmle(nsher.rk)
+ 
+## then Beverton and Holt
+nsher.bh       <-nsher
+model(nsher.bh)<-bevholt()
+nsher.bh       <-fmle(nsher.bh)
+ 
+## finally segmented regression/hockey-stick
+ 
+nsher.sg <- nsher
+model(nsher.sg) <- segreg()
+nsher.sg <- fmle(nsher.sg)
+</code>
+
+//**WARNING THE CODE WITH segreg DOES NOT RUN**//
+
+The first and arguably simplest model selection criteria one could apply is the Akaike Information Criterion (AIC) - in this particular case the statistically optimal model (in terms of closest fit to the data given the likelihood) is simply the model which minimises the AIC = -2 * likelihood(MLE) + nparams:
+
+<code R>
+AIC(nsher.rk)
+AIC(nsher.bh)
+AIC(nsher.sg)
+</code> 
+so from an AIC perspective we have a winner but let's not just trust one statistic... Save fit as a model.frame to use in xyplot
+<code R>
+
+sr.data=cbind(model.frame(FLQuants(ssb      =ssb(nsher.rk),
+                                   rec      =rec(nsher.rk),
+                                   residuals=residuals(nsher.rk),
+                                   fitted   =fitted(nsher.rk))),sr="ricker")
+
+## add Beverton and Holt fit
+sr.data=rbind(sr.data,
+        cbind(model.frame(FLQuants(ssb      =ssb(nsher.bh),
+                                   rec      =rec(nsher.bh),
+                                   residuals=residuals(nsher.bh),
+                                   fitted   =fitted(nsher.bh))),sr="bevholt"))
+
+sr.data=rbind(sr.data,
+        cbind(model.frame(FLQuants(ssb      =ssb(nsher.sg),
+                                   rec      =rec(nsher.sg),
+                                   residuals=residuals(nsher.sg),
+                                   fitted   =fitted(nsher.sg))),sr="segreg"))
+
+# compare fits
+xyplot(rec~ssb|sr, sr.data,
+  panel=function(x, y, subscripts){
+	panel.xyplot(x, y, pch=1,col="red")
+	panel.loess(x, y, lty=4,col="red")
+	panel.lines(sort(sr.data$ssb[subscripts]),             
+                    sr.data$fitted[subscripts][order(sr.data$ssb[subscripts])], pch=19)
+  }, as.table=T, subscripts=T, scale="free",xlab="SSB",ylab="Recruits")
+</code>
+
+Is it a better fit? Look at residuals over time
+
+<code R>
+xyplot(residuals~year|sr, sr.data,
+  panel=function(x, y, subscripts){
+	panel.abline(a=0, b=0, lty=2, col='blue')
+	panel.xyplot(sr.data$year[subscripts], 
+                     sr.data$residuals[subscripts], pch=19)
+	panel.xyplot(sr.data$year[subscripts], 
+                     sr.data$residuals[subscripts], type="h",col='blue')
+	panel.loess( sr.data$year[subscripts], 
+                     sr.data$residuals[subscripts], col="red")
+  }, as.table=T, subscripts=T, scale="free")
+</code>
+
+
+
+==== Alternative parameterisations ====
+Stock and recruitment relationships are often reparameterised in terms of steepness and virgin biomass, as this makes it easier to choose appropriate values which is often important when there is little information in the data. Virgin biomass is the biomass when F=0.0 and steepness is the ratio of expected recruitment at 40% of virgin biomass to that at virgin biomass.
+
+To estimate steepness and virgin biomass it is necessary to specify SPR0, (the spawner per recruit at F=0.0, i.e. virgin biomass). This can be done by including it as a fixed parameter - indeed it is highly inadvisable to try and estimate both steepness and SPR0 together. The information for steepness comes mostly from the gradient at the origin of the stock-recruit curve: α (recruits-per-spawner at low spawner abundance). For the Beverton-Holt model α = [4*s/(1-s))]/SPR0 and for the Ricker model α = [(5*s)^5/4]/SPR0 so it is highly unlikely to have information on both steepness (s) and spawners-per-recruit (SPR0) together.
+
+<code R>
+model(nsher)<-bevholtSV()
+nsher<-fmle(nsher,fixed=list(spr0=0.035))
+
+</code>
+
+Alternatively steepness can be fixed
+<code R>
+nsher<-fmle(nsher,fixed=list(spr0=0.035,s=.75))
+</code>
+
+There are two functions that can be used to change parameters between ''alpha/beta'' and ''steepness/virgin biomass''   
+    \\abPars(model, spr0, s = NULL, v, c = NULL, d = NULL)\\
+    \\svPars(model, spr0, a, b = NULL, c = NULL, d = NULL)\\ 
+
+<code R>
+## create trdaitional parameters from steepness and virgin biomass
+ab <- abPars("bevholt", 10.0, 0.75, 1000)
+ab
+
+## convert back
+sv <- svPars("bevholt", 10.0, ab["a"], ab["b"])
+sv
+</code>
+
+==== Autocorrelation ====
+
+Autocorrelation in the residuals can be fitted using the supplied functions ''bevholt.ar1()'', ''ricker.ar1()'' and ''shepherd.ar1()''
+
+For simplicity we generate an ''FLSR'' object with known parameters. 
+First choose a Beverton and Holt parametrised using steepness and virgin biomass
+so that it's easier to choose meaningful parameters
+
+<code R>
+## create test SR object
+# set SSB
+srAR1 <- FLSR(ssb=FLQuant(seq(1,100,length.out=50)))
+
+# set functional form and parameters
+model(srAR1) <-bevholtSV()
+params(srAR1)[c("s","v","spr0")]<-c(0.75,100,.1)
+
+# deterministic form
+rec(srAR1) <- predict(srAR1)
+
+## autocorrelated residuals
+ar.res<-rnorm(100,0,.5)
+for (i in 1:99)
+ ar.res[i+1]<-ar.res[i+1]+ar.res[i]*.5
+plot(ar.res[-1],ar.res[-100])
+
+rec(srAR1) <- rec(srAR1)*exp(ar.res[51:100])/mean(exp(ar.res[51:100]))
+
+## change the model to include autocorrelation and then fit
+model(srAR1) <- bevholtAR1()
+srAR1 <- fmle(srAR1)
+
+plot(srAR1)
+params(srAR1)
+
+</code>
+
+
+==== Fitting covariates ====
+
+//**WARNING THIS SECTION NEEDS REVISION, IT'S NOT WORKING!**//
+
+If residuals show a pattern over time it may suggest that an additional covariates could be fitted.
+
+Here we generate a data set with a covariate as a demonstration.
+
+<code R>
+## Generate test data set
+srTrnd       <-srAR1
+covar(srTrnd)<-FLQuants(covar=FLQuant(seq(-0.3,.3,length.out=50),
+                                       dimnames=dimnames(ssb(srTrnd))))
+model(srTrnd)<-bevholt.c.a()
+params(srTrnd)[c("a","b","c")]<-c(params(srAR1)[c("a","b")],2)
+
+## create covariate
+trend.res<-rnorm(50,0,.3)+covar(srTrnd)[[1]]
+trend.res<-FLQuant(trend.res,dimnames=dimnames(residuals(srTrnd)))
+plot(trend.res)
+
+## create recruits
+rec(srTrnd)<-predict(srTrnd)
+rec(srTrnd)<-rec(srTrnd)*exp(trend.res)
+
+# c is the covariate multiplier in the model
+# by fixing c at 0 we are effectively fitting without covariates
+srNoTrnd<-fmle(srTrnd,fixed=list(c=0))
+plot(  srNoTrnd)
+params(srNoTrnd)
+AIC(   srNoTrnd)
+
+## fit with covariate
+srTrnd<-fmle(srTrnd)
+plot(  srTrnd)
+params(srTrnd)
+AIC(   srTrnd)
+</code>
+
+
+
+
+==== Depensation ====
+
+//**WARNING THIS SECTION NEEDS REVISION, IT'S NOT WORKING!**//
+
+Depensation can occur if there is reduced recruitment at low population sizes
+
+
+<code R>
+## Set up simulated data set for a Ricker
+srDpn<-FLSR(ssb=FLQuant(seq(1,100,length.out=50)))
+model(srDpn)<-ricker.d()
+
+## set parameters using steepness and virgin biomass
+params(srDpn)[c("a","b","c")]<-c(sv2ab(0.75,100,10,"ricker"),1.5)
+
+## residuals
+res         <-rnorm(50,0,.5)
+
+## set recruits
+rec(srDpn)<-predict(srDpn)
+rec(srDpn)<-rec(srDpn)*exp(res)
+
+## now fit
+srDpn<-fmle(srDpn)
+plot(srDpn)
+params(srDpn)
+</code>
+
+===== Likelihood profiling =====
+
+//**WARNING THIS SECTION NEEDS REVISION, IT DOESN'T RUN**//
+
+It is often useful to look at how the likelihood changes with the parameters to make sure that the parameters are actually the maximum likelihood estimates. To do this first find the best estimate, then see how the likelihood changes as the parameters vary.
+
+<code R>
+# For this example we need the library 'akima'.
+# We can install this using the install.packages command and then choosing a repository
+install.packages(pkg="akima")
+
+library(akima) # this is used to interpolate over the parameters to smooth the plot
+
+# load data
+data(nsher)
+
+# create object
+
+nsher<-fmle(nsher)
+logLik(nsher)
+params(nsher)
+
+## create a grid centred on best guess
+range         <-seq(70,130,5)/100
+param.grid    <-expand.grid(a=range*params(nsher)["a",1],b=range*params(nsher)["b",1],ll=NA)
+
+## profile and plot liklihood around best guess
+for (i in 1:length(param.grid[,1]))
+   param.grid[i,"ll"]<-logLik(fmle(nsher,
+                                   fixed=(list(a=param.grid[i,"a"],b=param.grid[i,"b"]))))
+
+image(  interp(param.grid[,"a"], param.grid[,"b"]*1000, param.grid[,"ll"]),xlab='a',ylab='b*1e+3')
+contour(interp(param.grid[,"a"], param.grid[,"b"]*1000, param.grid[,"ll"]),add=T)
+</code>
+
+==== Confidence Intervals ====
+//** NOTE: THIS SUBSECTION NEEDS REVISION **//
+
+
+Likelihood Profiling can also be used to estimate confidence intervals using Maximum Likelihood theory and the fact that the ratio of likelihoods for models with different parameter values follows a chi-squared  distribution. 
+
+For example If LL(pmax) is the log-likelihood obtained by estimating all parameters and LL(p*) is the log-likelihood obtained by estimating a subset {*} of n parameters then
+
+2[LL(pmax) – LL(p*)] <= Chi-Squared(n, 1-a)
+
+can be used to calculate a (1-a)% confidence region for the parameter set {*}. For example, if one wanted a 95% confidence interval for one parameter the confidence interval for p encompasses all values of p for which twice the difference between the log likelihood and the log likelihood of the best estimate of p is less than 3.84. This can be found by searching for all the values of the parameter p that result in a difference in the log-likelihoods obtained by estimating all parameters and p with a difference of 3.84.
+
+=== Single Parameter ===
+An example of calculating confidence intervals for alpha
+<code R>
+# CI
+ll<-logLik(nsher)
+
+# Chi-squared for 1 parameter
+qchisq(.95,1)
+
+## create a function to minimise
+fn<- function(x, y) {(fmle(y,fixed=c(a=x))@logLik - (ll-qchisq(.95,1)/2))^2}
+
+## lower bound
+optimise(f=fn, interval=c(params(nsher)["a",1,drop=T]*.5, params(nsher)["a",1,drop=T]),     y=nsher)$minimum
+
+## upper bound
+optimise(f=fn, interval=c(params(nsher)["a",1,drop=T],    params(nsher)["a",1,drop=T]*2.0), y=nsher)$minimum
+</code>
+
+
+=== Two Parameters ===
+Similarly, confidence regions can be constructed for more than 1 parameter. For example having already calculated a likelihood surface for the stock recruitment relationship we can create a 2 dimensional confidence interval using a chi-squared distribution with 2 degrees of freedom
+
+<code R>
+image(  interp(param.grid[,"a"], param.grid[,"b"]*1000, param.grid[,"ll"]),xlab='a',ylab='b*1e+3')
+contour(interp(param.grid[,"a"], param.grid[,"b"]*1000, param.grid[,"ll"]),add=T, levels=(logLik(nsher)-qchisq(.95,2)/2), col="navy", lwd=2, add)
+</code>
+
+
+===== New models =====
+Alternative models can be implemented by users.
+
+Functional Forms are implemented using already or user defined functions, these contain six elements,
+   logl      # log likelihood 
+   grad      # gradient of the log likelihood with respect to the parameters
+   initial   #  starting values for the parameters, or preprocessing code
+   upper     #  bounds on parameters 
+   lower     #  bounds on parameters
+   model     #  the model as a formula object
+
+The function that implements a Beverton & Holt stock recruitment relationship with normal log errors.
+
+<code R>
+## example of implementing a Beverton & Holt stock recruitment relationship
+bevholt <- function()
+  {
+  ## log likelihood, assuming normal log.
+  logl <- function(a, b, sigma2, rec, ssb)
+	sum(dnorm(log(rec), log(a*ssb/(b+ssb)), sqrt(sigma2), TRUE))
+
+  ## initial parameter values
+  initial <- structure(function(rec, ssb)
+	{
+	a <- max(rec) + 0.1 * (max(rec) - min(rec))
+	b <- 0.5 * min(ssb)
+	sigma2 <- var(log(rec /( a * ssb / (b + ssb))), y= NULL, na.rm = TRUE) 	
+	return(list(a=a, b=b, sigma2=sigma2))
+	},
+
+  ## bounds
+  lower=c(0, 0.0001, 0.0001),
+  upper=rep(Inf, 3))
+
+  ## model to be fitted
+  model  <- rec~a*ssb/(b+ssb)
+  
+  return(list(logl=logl, model=model, initial=initial))
+  }
+
+</code>
+
+Alternative forms can be implemented by changing the model
+
+<code R>
+## current model 
+model(nsher)
+
+## Cushing model
+as.formula(rec ~ a * ssb^b)
+
+## example of implementing a Cushing stock recruitment relationship
+cushing <- function()
+  {
+  ## log likelihood, assuming normal log.
+  logl <- function(a, b, sigma2, rec, ssb)
+		sum(dnorm(log(rec), log(a*ssb^b), sqrt(sigma2), TRUE))
+
+  ## initial parameter values
+  initial <- structure(function(rec, ssb)
+  		{
+			a <- mean(rec/ssb)
+			b <- 1.0
+			sigma2 <- var(log(rec /a*ssb^b), y= NULL, na.rm = TRUE)
+			return(list(a=a, b=b, sigma2=sigma2))
+	  	},
+
+  ## bounds
+  lower=c(0, 0.0001, 0.0001),
+	upper=rep(Inf, 3))
+
+  ## model to be fitted
+  model  <- rec~a*ssb^b
+
+	return(list(logl=logl, model=model, initial=initial))
+}
+</code>
+
+Running the new formulation
+<code R>
+model(nsher)<-cushing()
+nsher<-fmle(nsher)
+
+sr.data=cbind(model.frame(FLQuants(ssb      =ssb(nsher),
+                                   rec      =rec(nsher),
+                                   residuals=residuals(nsher),
+                                   fitted   =fitted(nsher))),sr="cushing")
+
+xyplot(rec~ssb|sr, sr.data,
+  panel=function(x, y, subscripts){
+	panel.xyplot(x, y, pch=1,col="red")
+	panel.loess(x, y, lty=4,col="red")
+	panel.lines(sort(sr.data$ssb[subscripts]),
+                    sr.data$fitted[subscripts][order(sr.data$ssb[subscripts])], pch=19)
+  }, as.table=T, subscripts=T, scale="free",xlab="SSB",ylab="Recruits")
+
+</code>
+
+
+====== References ======
+
+Nash, R.D.M., Dickey-Collas, M., and Kell, L.T., 2009.  Stock and recruitment in North Sea herring (Clupea harengus); compensation and depensation in the population dynamics. Fisheries Research,  95: 88-97.

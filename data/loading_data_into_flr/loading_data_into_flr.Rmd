@@ -1,0 +1,37 @@
+---
+title: Example post
+description:
+post_author: You
+date: 
+layout: post
+tags: [one two]
+categories: learning
+section:
+rights:  Creative Commons Share Alike 4.0
+---
+
+```{r, pkgs, echo=TRUE, results='hide', message=FALSE}
+library(FLCore)
+```
+
+# Section
+
+## Subsection
+
+
+```{r, CODE, echo=TRUE, results='markup', message=FALSE}
+library(FLCore)
+```
+
+```{r, PLOT, echo=TRUE, fig.cap="FIGURE CAPTION."}
+plot(9)
+```
+
+# More information
+
+## Package versions
+
+This tutorial was prepared with the following versions of R and FLR.
+
+* `r version$version.string`
+* FLCore: `r packageVersion('FLCore')`
